@@ -19,12 +19,13 @@ public class Main {
     public static void main(String[] args) {
         // Подключение к MongoDB
         MongoClient mongoClient = null;
-        MongoCredential credential = MongoCredential.createCredential("admin1", "admin", "Cool12211221!$$".toCharArray());
-        mongoClient = new MongoClient(new ServerAddress("89.248.206.92", 27017), Arrays.asList(credential));
+
+        mongoClient = new MongoClient(new ServerAddress("localhost", 27017));
 
         // Выбор базы данных и коллекции
         MongoDatabase database = mongoClient.getDatabase("avito");
-        MongoCollection<Document> collection = database.getCollection("price_history");
+        MongoCollection<Document> price_history = database.getCollection("price_history");
+        MongoCollection<Document> avito_collection = database.getCollection("avito_collection");
 
         try (WebClient webClient = new WebClient()) {
             webClient.getOptions().setUseInsecureSSL(true);
@@ -32,30 +33,40 @@ public class Main {
             webClient.getOptions().setJavaScriptEnabled(false);
 
             while (true) {
-                for (Document doc : collection.find()) {
-                    String url = doc.getString("link"); // Предположим, что URL хранится в поле "url"
+                for (Document historyDoc : price_history.find()) {
+                    String link = historyDoc.getString("link"); // Поле "link" в коллекции price_history
 
-                    if (url != null && !url.isEmpty()) {
+                    if (link != null && !link.isEmpty()) {
                         try {
                             // Загрузите страницу по URL
-                            HtmlPage page = webClient.getPage(url);
+                            HtmlPage page = webClient.getPage(link);
 
                             // Ищите элемент на странице
                             HtmlElement element = page.getFirstByXPath("//span[@class='closed-warning-content-_f4_B']");
 
                             if (element != null) {
-                                // Если элемент найден, удалите документ из коллекции price_history
-                                collection.deleteOne(doc);
-                                System.out.println("Документ удален с URL: " + url);
+                                // Ищите элемент в avito_collection с использованием поля "url"
+                                Document avitoDoc = avito_collection.find(new Document("url", link)).first();
+
+                                if (avitoDoc != null) {
+                                    // Удалите документ из avito_collection
+                                    avito_collection.deleteOne(avitoDoc);
+                                    System.out.println("Документ удален из avito_collection с URL: " + link);
+                                }
+
+                                // Затем удалите документ из коллекции price_history
+                                price_history.deleteOne(historyDoc);
+                                System.out.println("Документ удален из price_history с URL: " + link);
+
                                 // Открываем файл для записи URL удаленных документов
                                 try (FileWriter fileWriter = new FileWriter("deleted_document_urls.txt", true)) {
-                                    fileWriter.write(url + "\n");
+                                    fileWriter.write(link + "\n");
                                 }
                             } else {
-                                System.out.println("Элемент не найден на странице с URL: " + url);
+                                System.out.println("Элемент не найден на странице с URL: " + link);
                             }
                         } catch (Exception e) {
-                            System.out.println("Ошибка при загрузке страницы с URL: " + url);
+                            System.out.println("Ошибка при обработке URL: " + link);
                         }
 
                         // Приостанавливаем выполнение цикла на 20 секунд (20000 миллисекунд)
@@ -67,7 +78,8 @@ public class Main {
             e.printStackTrace();
         }
 
-        // Закрытие соединения с MongoDB
+// Закрытие соединения с MongoDB
         mongoClient.close();
+
     }
 }
